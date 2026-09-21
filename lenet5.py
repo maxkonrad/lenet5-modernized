@@ -2,7 +2,6 @@ import numpy as np
 from numpy.typing import NDArray
 from numpy.lib.stride_tricks import sliding_window_view
 from typing import Any
-import load
 
 class LeNet5:
     def __init__(self,) -> None:
@@ -65,9 +64,90 @@ class LeNet5:
         return out, cache
 
     def backward(self, fw_out: NDArray[np.float64], cache: dict[str, Any], labels: NDArray[np.uint8]):
-        self.cross_entropy_loss(fw_out, labels)
+        grads = {}
+        loss = self.cross_entropy_loss(fw_out, labels)
+        batch_size = fw_out.shape[0]
+        one_hot_target = np.zeros_like(fw_out)
+        one_hot_target[np.arange(batch_size), labels] = 1.0
+        dZ = (fw_out - one_hot_target) / batch_size
+        dW = cache["output"]["input"].T @ dZ
+        db = np.sum(dZ, axis=0, keepdims=True)
+        dX = dZ @ self.out_weights.T
 
-    def cross_entropy_loss(self, probabilities: NDArray[np.float64], labels: NDArray[np.uint8]) -> NDArray[np.float64]:
+        dZ_f6 = dX * (cache["f6"]["pre_activation"] > 0)
+        dW_f6 = cache["f6"]["input"].T @ dZ_f6
+        db_f6 = np.sum(dZ_f6, axis=0, keepdims=True)
+        dX_f6 = dZ_f6 @ self.f84_weights.T
+
+        dZ_c5 = dX_f6 * (cache["c5"]["pre_activation"] > 0)
+        dW_c5 = cache["c5"]["input"].T @ dZ_c5
+        db_c5 = np.sum(dZ_c5, axis = 0, keepdims=True)
+        dX_c5 = dZ_c5 @ self.f120_weights.T
+
+        dPool2 = np.reshape(dX_c5, (batch_size, 16, 4, 4))
+        dFeatureMap2 = np.repeat(np.repeat(dPool2, 2, axis=2), 2, axis=3) / 4
+        dZConv2 = dFeatureMap2 * (cache["conv2"]["pre_activation"] > 0)
+        db2 = np.sum(dZConv2, axis=(0, 2, 3), keepdims=True)
+
+        X_conv2 = cache["conv2"]["input"]
+        X_windows = sliding_window_view(X_conv2, window_shape=(5, 5), axis=(2, 3))
+
+        dW2 = np.tensordot(dZConv2, X_windows, axes=([0, 2, 3], [0, 2, 3]))
+        dZ_pad = np.pad(dZConv2, pad_width=((0,0), (0,0), (4,4), (4,4)), mode='constant')
+        W2_rot = self.kernel2[:, :, ::-1, ::-1]
+        dZ_windows = sliding_window_view(dZ_pad, window_shape=(5, 5), axis=(2, 3))
+        dX_conv2_temp = np.tensordot(dZ_windows, W2_rot, axes=([1, 4, 5], [0, 2, 3]))
+        dX_conv2 = np.moveaxis(dX_conv2_temp, -1, 1)
+
+        dPool1 = np.reshape(dX_conv2, (batch_size, 6, 12, 12))
+        dFeatureMap1 = np.repeat(np.repeat(dPool1, 2, axis=2), 2, axis=3) / 4
+        dZConv1 = dFeatureMap1 * (cache["conv1"]["pre_activation"] > 0)
+        db1 = np.sum(dZConv1, axis=(0, 2, 3), keepdims=True)
+
+        X_conv1 = cache["conv1"]["input"]
+        X_windows = sliding_window_view(X_conv1, window_shape=(5, 5), axis=(2, 3))
+
+        dW1 = np.tensordot(dZConv1, X_windows, axes=([0, 2, 3], [0, 2, 3]))
+        dZ_pad = np.pad(dZConv1, pad_width=((0,0), (0,0), (4,4), (4,4)), mode='constant')
+        W1_rot = self.kernel1[:, :, ::-1, ::-1]
+        dZ_windows = sliding_window_view(dZ_pad, window_shape=(5, 5), axis=(2, 3))
+        dX_conv1_temp = np.tensordot(dZ_windows, W1_rot, axes=([1, 4, 5], [0, 2, 3]))
+        dX_conv1 = np.moveaxis(dX_conv1_temp, -1, 1)
+
+        grads["kernel1"]      = dW1
+        grads["bias1"]        = db1
+
+        grads["kernel2"]      = dW2
+        grads["bias2"]        = db2
+
+        grads["f120_weights"] = dW_c5
+        grads["f120_bias"]    = db_c5
+
+        grads["f84_weights"]  = dW_f6
+        grads["f84_bias"]     = db_f6
+
+        grads["out_weights"]  = dW
+        grads["out_bias"]     = db
+
+        return grads, loss
+
+    def update_weights(self, grads: dict[str, NDArray[np.float64]], learning_rate: float):
+            self.kernel1 -= learning_rate * grads["kernel1"]
+            self.bias1   -= learning_rate * grads["bias1"]
+
+            self.kernel2 -= learning_rate * grads["kernel2"]
+            self.bias2   -= learning_rate * grads["bias2"]
+
+            self.f120_weights -= learning_rate * grads["f120_weights"]
+            self.f120_bias    -= learning_rate * grads["f120_bias"]
+
+            self.f84_weights  -= learning_rate * grads["f84_weights"]
+            self.f84_bias     -= learning_rate * grads["f84_bias"]
+
+            self.out_weights  -= learning_rate * grads["out_weights"]
+            self.out_bias     -= learning_rate * grads["out_bias"]
+
+    def cross_entropy_loss(self, probabilities: NDArray[np.float64], labels: NDArray[np.uint8]) -> np.float64:
         one_hot_target = np.zeros_like(probabilities)
         batch_size = probabilities.shape[0]
         one_hot_target[np.arange(batch_size), labels] = 1.0
@@ -75,7 +155,7 @@ class LeNet5:
         epsilon = 1e-15
         clipped_probs = np.clip(probabilities, epsilon, 1.0 - epsilon)
 
-        loss : NDArray[np.float64] = -np.sum(one_hot_target * np.log(clipped_probs)) / batch_size
+        loss = -np.sum(one_hot_target * np.log(clipped_probs)) / batch_size
         return loss
 
     def conv2D(self, input: NDArray[np.float64], kernel: NDArray[np.float64], bias: NDArray[np.float64]) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
@@ -107,13 +187,3 @@ class LeNet5:
         exp_logits = np.exp(shifted_logits)
         probabilities = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
         return probabilities
-
-
-x_train = load.images("train-images.idx3-ubyte")
-y_train = load.labels("train-labels.idx1-ubyte")
-
-
-data: NDArray[np.float64] = np.random.rand(1, 1, 28, 28)
-net = LeNet5()
-out, cache = net.forward(data)
-net.backward(out, cache, y_train)

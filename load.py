@@ -6,11 +6,6 @@ import numpy as np
 def images(path: str):
     with open(path, "rb") as f:
         magic, num_images, rows, cols = struct.unpack(">IIII", f.read(16))
-
-        print("magic:", magic)
-        print("images:", num_images)
-        print("shape:", rows, cols)
-
         data = np.frombuffer(f.read(), dtype=np.uint8)
 
     return data.reshape(num_images, rows, cols)
@@ -19,10 +14,6 @@ def images(path: str):
 def labels(path: str):
     with open(path, "rb") as f:
         magic, num_labels = struct.unpack(">II", f.read(8))
-
-        print("magic:", magic)
-        print("labels:", num_labels)
-
         labels = np.frombuffer(f.read(), dtype=np.uint8)
 
     return labels

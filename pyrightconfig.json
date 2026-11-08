@@ -1,4 +1,6 @@
 {
   "venvPath": ".",
-  "venv": ".venv"
+  "venv": ".venv",
+  "exclude": ["**/.venv", "**/data", "**/checkpoints"],
+  "typeCheckingMode": "standard"
 }

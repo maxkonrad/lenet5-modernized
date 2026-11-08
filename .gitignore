@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# MNIST data + training artifacts (downloaded on demand, never committed)
+data/
+checkpoints/
+*.ubyte
+*.idx*-ubyte
+*-idx*-ubyte/
+*.npz
+*.pkl
